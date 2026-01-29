@@ -1,60 +1,4 @@
 #!/usr/bin/env python3
-"""
-eval_final.py — Definitive Sparse Twin Attention Evaluation
-============================================================
-
-The last evaluation script you'll ever need.
-
-COMPATIBILITY:
---------------
-- v2.3 models: Works (backward compatible)
-- v2.4 models: Full support with total_cells context
-
-v2.4 automatically passes total_cells (developmental stage) to the model
-for stage-aware embeddings. Falls back gracefully for v2.3 models.
-
-Features:
----------
-1. SMART MANIFOLD BUILDING
-   - Large manifold (5M+ embeddings) with multi-reference aggregation
-   - Biological sampling (10% FPS/cluster/polar/boundary)
-   - Explicit subset size stratification (equal coverage 5-20)
-   - Stage-balanced oversampling
-
-2. INTELLIGENT KNN VOTING
-   - Adaptive k by developmental stage (optional, toggled)
-   - Dispersion-based filtering (exclude unreliable embeddings)
-   - Stage filtering with graceful fallback (toggled independently)
-   - Label frequency correction to debias common cell types
-
-3. COMPREHENSIVE ERROR ANALYSIS
-   - Biologically meaningful error categories:
-     * Sibling error (ABal vs ABar - differ by 1 character)
-     * Cousin error (ABala vs ABara - same grandparent)
-     * Lineage error (same founder branch, e.g., AB lineage)
-     * Cross-lineage error (different founder, e.g., AB vs MS)
-   - Top confusions, hardest cells, error rate by stage/size
-
-4. BEAUTIFUL VISUALIZATIONS
-   - Line plots (not bar charts) for accuracy trends
-   - Publication-quality t-SNEs (Twin Attention style)
-   - Stage-colored and cell-type-colored manifold plots
-
-5. FULL CONFIGURABILITY
-   - Toggle stage hints on/off to measure their impact
-   - Toggle biological sampling, dispersion filtering
-   - Configurable manifold size, k values, reference counts
-
-Usage:
-------
-  python eval_final.py --help                    # See all options
-  python eval_final.py                           # Run with defaults
-  python eval_final.py --no_stage_hints          # Disable all stage info
-  python eval_final.py --manifold_size 10000000  # 10M manifold
-
-Author: Henry (Horace Greeley High School)
-Date: January 2026
-"""
 
 from __future__ import annotations
 
@@ -75,7 +19,6 @@ from collections import defaultdict, Counter
 
 import numpy as np
 
-# Force non-interactive backend before importing pyplot
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -90,17 +33,12 @@ from sklearn.manifold import TSNE
 
 warnings.filterwarnings("ignore")
 
-# Ensure UTF-8 output
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 except Exception:
     pass
 
-
-# =============================================================================
-# PATHS (VSCode-friendly defaults)
-# =============================================================================
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -2440,4 +2378,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+
     main()
