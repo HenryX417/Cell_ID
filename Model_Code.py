@@ -1,29 +1,3 @@
-"""
-Sparse Twin Attention v2.4 — With Total Cells Context
-======================================================
-
-CHANGES FROM v2.3:
-- SparsePointFeatures now takes total_cells (embryo size) as input feature
-- This gives the model crucial developmental stage context
-- Model learns that same spatial patterns mean different things at different stages
-- Expected accuracy improvement: +10-15% on eval manifold task
-
-UNCHANGED:
-- Twin Attention architecture (REF || QUERY joint processing)
-- Sample-first-then-normalize
-- Learnable no-match token
-- Curriculum learning
-- Hard negatives
-- Temporal smoothness
-- All other training logic
-
-KEY INSIGHT:
-Previously the model only knew subset_size (5-20 observed cells).
-Now it also knows total_cells (5-194 cells in full embryo).
-This is crucial because the same 15-cell spatial pattern has completely
-different cell identities depending on whether it's from a 20-cell or 190-cell embryo.
-"""
-
 import os
 import math
 import pickle
@@ -66,7 +40,7 @@ class Config:
     num_heads: int = 8
     num_layers: int = 6
     dropout: float = 0.10
-    max_seq_len: int = 64  # must exceed (max_ref + 1 + max_query) = 20+1+20=41
+    max_seq_len: int = 64  
 
     # training
     batch_size: int = 32
@@ -81,7 +55,7 @@ class Config:
     pairs_per_stage: int = 6000
     intra_prob: float = 0.60
     bio_rate: float = 0.10
-    force_random: bool = False  # keep False to allow bio_rate>0; set True to disable biological sampling
+    force_random: bool = False 
 
     # inter-pair stage matching (kept as default = 1.0, faithful to your prior behavior)
     INTER_STAGE_MATCH_PROB: float = 0.9  # set <1.0 later if you want more stage mismatch exposure
@@ -103,7 +77,7 @@ class Config:
     hard_neg_base_k: int = 0
     hard_neg_max_k: int = 2
 
-    temporal_weight: float = 0.03  # small, stable
+    temporal_weight: float = 0.03 
 
     # checkpoint
     ckpt_dir: str = "checkpoints_v2_4"
@@ -145,7 +119,6 @@ def normalize_coords(coords: np.ndarray) -> np.ndarray:
 
 
 class BiologicalSampler:
-    """Biologically-inspired sampling strategies; used sparsely via bio_rate."""
     @staticmethod
     def sample_cells(all_cells: Dict[str, Any], n_target: int, strategy: str = "random") -> List[str]:
         cell_ids = list(all_cells.keys())
@@ -171,7 +144,6 @@ class BiologicalSampler:
 
     @staticmethod
     def _diverse_fps(coords: np.ndarray, n_target: int) -> List[int]:
-        # pragmatic O(n*n_target), fine for n<=200 and n_target<=20
         selected = [random.randint(0, len(coords) - 1)]
         min_dist = np.full(len(coords), np.inf)
         for _ in range(n_target - 1):
@@ -190,7 +162,6 @@ class BiologicalSampler:
 
     @staticmethod
     def _boundary(coords: np.ndarray, n_target: int) -> List[int]:
-        # can be slower; bio_rate is low so ok
         try:
             hull = ConvexHull(coords)
             boundary_idx = np.unique(hull.simplices.flatten())
@@ -228,17 +199,8 @@ class BiologicalSampler:
 class SparsePointFeatures(nn.Module):
     """
     Relational geometric encoding for sparse point clouds.
-    
-    v2.4: Biologically-grounded features focused on RELATIONAL information.
-    
-    Key insight from user: We can't assume anything about WHERE in the embryo 
-    the subset came from (cluster vs spread?). All features must be purely 
-    relational - how cells relate to EACH OTHER.
-    
-    Biology: Sibling cells (hardest errors) are spatially close and in similar
-    local environments. Features should capture this.
-    
-    Features (computed efficiently from single distance matrix):
+
+    Features:
     1. Relative position to centroid      (3 -> 20)  - local spatial structure
     2. Centroid distance (normalized)     (1 -> 16)  - how peripheral in subset
     3. Subset size embedding              (N -> 16)  - context about observation
@@ -251,8 +213,6 @@ class SparsePointFeatures(nn.Module):
        - Centrality rank (0-1)            - most central to most peripheral
     
     Total: 128 dims
-    
-    CPU-optimized: Distance matrix computed ONCE, all features derived from it.
     """
     def __init__(self, embed_dim: int):
         super().__init__()
@@ -268,9 +228,9 @@ class SparsePointFeatures(nn.Module):
         
         self.rel = nn.Linear(3, d_rel)
         self.cdist = nn.Linear(1, d_cdist)
-        self.count = nn.Embedding(64, d_count)      # subset size: 0-63
-        self.total = nn.Embedding(256, d_total)     # total cells: 0-255
-        self.pairwise = nn.Linear(5, d_pairwise)    # 5 relational stats
+        self.count = nn.Embedding(64, d_count)      
+        self.total = nn.Embedding(256, d_total)     
+        self.pairwise = nn.Linear(5, d_pairwise)    
 
     def forward(
         self, 
@@ -291,37 +251,37 @@ class SparsePointFeatures(nn.Module):
         device = points.device
 
         if mask is not None:
-            m = mask.float().unsqueeze(-1)  # [B,N,1]
+            m = mask.float().unsqueeze(-1)  
             pts = points * m
-            n_valid = mask.sum(dim=1, keepdim=True).clamp(min=1).float()  # [B,1]
-            centroid = pts.sum(dim=1, keepdim=True) / n_valid.unsqueeze(-1)  # [B,1,3]
+            n_valid = mask.sum(dim=1, keepdim=True).clamp(min=1).float()  
+            centroid = pts.sum(dim=1, keepdim=True) / n_valid.unsqueeze(-1)  
         else:
             centroid = points.mean(dim=1, keepdim=True)
             n_valid = torch.full((B, 1), float(N), device=device)
             m = torch.ones(B, N, 1, device=device)
 
-        # === 1. Relative position ===
+        #1. Relative position
         rel = points - centroid
         f_rel = self.rel(rel)
         
-        # === 2. Centroid distance (normalized by max in subset) ===
-        cdist = torch.norm(rel, dim=-1, keepdim=True)  # [B,N,1]
+        #2. Centroid distance (normalized by max in subset)
+        cdist = torch.norm(rel, dim=-1, keepdim=True)  
         cdist_max = (cdist * m).reshape(B, -1).max(dim=1, keepdim=True)[0].unsqueeze(-1).clamp(min=1e-6)
         cdist_norm = cdist / cdist_max
         f_cdist = self.cdist(cdist_norm)
 
-        # === 3. Subset size (observed cells) ===
-        n_idx = n_valid.clamp(max=63).long().squeeze(1)  # [B]
+        #3. Subset size (observed cells)
+        n_idx = n_valid.clamp(max=63).long().squeeze(1) 
         f_count = self.count(n_idx).unsqueeze(1).expand(-1, N, -1)
 
-        # === 4. Total cells (developmental stage) ===
+        #4. Total cells (developmental stage)
         if total_cells is not None:
-            total_idx = total_cells.clamp(min=0, max=255).long()  # [B]
+            total_idx = total_cells.clamp(min=0, max=255).long()
         else:
-            total_idx = n_idx  # Fallback
+            total_idx = n_idx  
         f_total = self.total(total_idx).unsqueeze(1).expand(-1, N, -1)
 
-        # === 5. Pairwise relational features (single dist matrix computation) ===
+        #5. Pairwise relational features 
         pairwise_vals = self._compute_pairwise_features(points, mask)
         f_pairwise = self.pairwise(pairwise_vals)
 
@@ -332,17 +292,7 @@ class SparsePointFeatures(nn.Module):
         points: torch.Tensor, 
         mask: Optional[torch.Tensor],
     ) -> torch.Tensor:
-        """
-        Compute ALL relational features from a single distance matrix.
         
-        Returns:
-            features: [B, N, 5] containing:
-                [0] local_density - mean k-NN distance (normalized)
-                [1] mean_dist - mean distance to all others (centrality)
-                [2] min_dist - nearest neighbor distance (KEY for siblings!)
-                [3] std_dist - std of distances to others (uniformity)
-                [4] rank - centrality percentile (0=most central, 1=most peripheral)
-        """
         B, N, _ = points.shape
         device = points.device
         
@@ -361,43 +311,33 @@ class SparsePointFeatures(nn.Module):
             
             pts = points[b, valid]  # [n, 3]
             
-            # === Single distance matrix computation (CPU-optimized) ===
-            # ||a-b||² = ||a||² + ||b||² - 2*a·b
-            pts_sq = (pts ** 2).sum(dim=1, keepdim=True)  # [n,1]
-            d_sq = pts_sq + pts_sq.T - 2 * torch.mm(pts, pts.T)  # [n,n]
-            dist_mat = torch.sqrt(d_sq.clamp(min=0))  # [n,n]
+            pts_sq = (pts ** 2).sum(dim=1, keepdim=True)  
+            d_sq = pts_sq + pts_sq.T - 2 * torch.mm(pts, pts.T) 
+            dist_mat = torch.sqrt(d_sq.clamp(min=0))  
             
             # Normalize by max distance for scale invariance
             max_dist = dist_mat.max().clamp(min=1e-6)
             
-            # Mask for excluding self-distances
+            # Mask 
             eye = torch.eye(n, device=device, dtype=torch.bool)
             dist_no_self = dist_mat.masked_fill(eye, float('inf'))
             
-            # [0] Local density: mean of k=3 nearest neighbors
             k = min(3, n - 1)
             knn_dists, _ = torch.topk(dist_no_self, k=k, largest=False, dim=1)
-            local_dens = knn_dists.mean(dim=1) / max_dist  # [n]
+            local_dens = knn_dists.mean(dim=1) / max_dist 
             
-            # [1] Mean distance to all others (centrality)
-            # Lower = more central in the point cloud
-            mean_d = dist_mat.sum(dim=1) / (n - 1) / max_dist  # [n]
+            mean_d = dist_mat.sum(dim=1) / (n - 1) / max_dist 
             
-            # [2] Min distance (nearest neighbor) - KEY for distinguishing siblings
-            min_d = dist_no_self.min(dim=1)[0] / max_dist  # [n]
+            min_d = dist_no_self.min(dim=1)[0] / max_dist 
             
-            # [3] Std of distances (uniformity of surroundings)
-            # Mask self, compute std per row
             std_d = torch.zeros(n, device=device)
             for i in range(n):
                 others = dist_mat[i, ~eye[i]]
                 std_d[i] = others.std() if n > 2 else 0.0
             std_d = std_d / max_dist
             
-            # [4] Centrality rank (0 = most central, 1 = most peripheral)
-            # Based on mean distance
             if n > 1:
-                ranks = mean_d.argsort().argsort().float()  # double argsort = rank
+                ranks = mean_d.argsort().argsort().float()  
                 rank = ranks / (n - 1)
             else:
                 rank = torch.zeros(n, device=device)
@@ -418,16 +358,6 @@ class SparsePointFeatures(nn.Module):
 # =============================================================================
 
 class SparseTwinAttentionEncoder(nn.Module):
-    """
-    Twin Attention style: joint transformer over [REF || QUERY].
-    
-    v2.4 CHANGE: forward() now accepts total_cells_ref and total_cells_query
-    to provide developmental stage context to the feature encoder.
-    
-    API:
-        forward(ref_points, query_points, ref_mask, query_mask, 
-                total_cells_ref=None, total_cells_query=None, epoch=0)
-    """
     def __init__(
         self,
         embed_dim: int = 128,
@@ -449,11 +379,11 @@ class SparseTwinAttentionEncoder(nn.Module):
         else:
             self.proj = nn.Linear(3, embed_dim)
 
-        # positional + token type embeddings (ref vs query)
+        # positional + token type embeddings
         self.pos = nn.Parameter(torch.randn(1, max_seq_len, embed_dim) * 0.02)
-        self.type_emb = nn.Embedding(2, embed_dim)  # 0=ref, 1=query
+        self.type_emb = nn.Embedding(2, embed_dim)  
 
-        # learnable no-match token (appended to REF)
+        # learnable no-match token
         self.no_match = nn.Parameter(torch.randn(1, 1, embed_dim) * 0.02)
 
         enc_layer = nn.TransformerEncoderLayer(
@@ -479,11 +409,11 @@ class SparseTwinAttentionEncoder(nn.Module):
         self, 
         pts: torch.Tensor, 
         mask: Optional[torch.Tensor],
-        total_cells: Optional[torch.Tensor] = None,  # NEW in v2.4
+        total_cells: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Encode point cloud to tokens with optional total_cells context."""
         if self.use_sparse_features:
-            z = self.feat(pts, mask, total_cells)  # Pass total_cells to features
+            z = self.feat(pts, mask, total_cells) 
             z = self.proj(z)
         else:
             z = self.proj(pts)
@@ -495,43 +425,25 @@ class SparseTwinAttentionEncoder(nn.Module):
         query_points: torch.Tensor,
         ref_mask: Optional[torch.Tensor] = None,
         query_mask: Optional[torch.Tensor] = None,
-        total_cells_ref: Optional[torch.Tensor] = None,    # NEW in v2.4
-        total_cells_query: Optional[torch.Tensor] = None,  # NEW in v2.4
+        total_cells_ref: Optional[torch.Tensor] = None,   
+        total_cells_query: Optional[torch.Tensor] = None,  
         epoch: int = 0
     ):
-        """
-        Args:
-            ref_points: [B, Nr, 3]
-            query_points: [B, Nq, 3]
-            ref_mask: [B, Nr]
-            query_mask: [B, Nq]
-            total_cells_ref: [B] - total cells in ref embryo (NEW)
-            total_cells_query: [B] - total cells in query embryo (NEW)
-            epoch: current training epoch
-            
-        Returns:
-            ref_out: embeddings for ref + no-match token
-            query_out: embeddings for query cells
-            temperature: learned temperature scalar
-        """
         B, Nr, _ = ref_points.shape
         _, Nq, _ = query_points.shape
 
-        # Encode with total_cells context (v2.4 change)
         zr = self.encode_tokens(ref_points, ref_mask, total_cells_ref)
         zq = self.encode_tokens(query_points, query_mask, total_cells_query)
 
         # append no-match to ref side
-        nm = self.no_match.expand(B, -1, -1)  # [B,1,D]
-        zr = torch.cat([zr, nm], dim=1)  # [B,Nr+1,D]
+        nm = self.no_match.expand(B, -1, -1)  
+        zr = torch.cat([zr, nm], dim=1) 
 
-        # build joint sequence: [REF(with no-match) || QUERY]
-        z = torch.cat([zr, zq], dim=1)  # [B, (Nr+1+Nq), D]
+        z = torch.cat([zr, zq], dim=1) 
         seq_len = z.shape[1]
         if seq_len > self.pos.shape[1]:
             raise ValueError(f"Sequence length {seq_len} exceeds max_seq_len={self.pos.shape[1]}")
 
-        # token types: ref=0 for first (Nr+1), query=1 for rest
         type_ids = torch.cat([
             torch.zeros(B, Nr + 1, device=z.device, dtype=torch.long),
             torch.ones(B, Nq, device=z.device, dtype=torch.long)
@@ -544,11 +456,10 @@ class SparseTwinAttentionEncoder(nn.Module):
         if query_mask is None:
             query_mask = torch.ones(B, Nq, device=z.device)
 
-        # ref_mask does NOT include no-match; add it as valid
-        ref_mask_nm = torch.cat([ref_mask.float(), torch.ones(B, 1, device=z.device)], dim=1)  # [B,Nr+1]
-        joint_valid = torch.cat([ref_mask_nm, query_mask.float()], dim=1)  # [B, seq]
-        key_padding = (joint_valid < 0.5)  # True = ignore
-
+        ref_mask_nm = torch.cat([ref_mask.float(), torch.ones(B, 1, device=z.device)], dim=1)  
+        joint_valid = torch.cat([ref_mask_nm, query_mask.float()], dim=1)  
+        key_padding = (joint_valid < 0.5)  
+        
         z = self.tr(z, src_key_padding_mask=key_padding)
 
         zr_out = z[:, :Nr + 1, :]
@@ -570,20 +481,10 @@ class SparseTwinAttentionEncoder(nn.Module):
 
 
 # =============================================================================
-# DATASET (v2.4 - RETURNS TOTAL CELLS)
+# DATASET
 # =============================================================================
 
 class SparsePairDataset(Dataset):
-    """
-    Produces (ref_pc, query_pc, ref_mask, query_mask, match_indices, temporal_pairs, info)
-
-    v2.4 CHANGE: info dict now includes 'total_cells_ref' and 'total_cells_query'
-    for passing developmental stage context to the model.
-    
-    match_indices are for QUERY cells:
-      - values in [0, Nr-1] -> matched ref index
-      - value == Nr          -> no-match (points to ref no-match token)
-    """
 
     STAGE_BINS = {
         "early": (5, 50),
@@ -786,8 +687,7 @@ class SparsePairDataset(Dataset):
         pair = self.pairs[idx % len(self.pairs)]
         a = pair["anchor"]
         c = pair["comp"]
-
-        # IMPORTANT: REF = comparison, QUERY = anchor (twin attention uses ref as "atlas")
+        
         ref_ids, ref_xyz, query_ids, query_xyz = self._sample_pair(c["cells"], a["cells"])
 
         if self.augment:
@@ -805,7 +705,6 @@ class SparsePairDataset(Dataset):
             for cid in shared_ids:
                 temporal_pairs.append((query_ids.index(cid), ref_index[cid]))
 
-        # v2.4 CHANGE: Include total_cells for both ref and query embryos
         info = {
             "pair_type": pair["pair_type"],
             "stage": pair["stage"],
@@ -814,8 +713,8 @@ class SparsePairDataset(Dataset):
             "run_ref": c["run"],
             "time_ref": c["time"],
             "n_shared": int(len(set(query_ids) & set(ref_ids))),
-            "total_cells_ref": c["n_cells"],      # NEW: total cells in ref embryo
-            "total_cells_query": a["n_cells"],    # NEW: total cells in query embryo
+            "total_cells_ref": c["n_cells"],     
+            "total_cells_query": a["n_cells"],    
         }
 
         return (
@@ -830,14 +729,10 @@ class SparsePairDataset(Dataset):
 
 
 # =============================================================================
-# COLLATE (v2.4 - EXTRACTS TOTAL CELLS)
+# COLLATE 
 # =============================================================================
 
 def collate_fn(batch):
-    """
-    v2.4 CHANGE: Also extracts and batches total_cells_ref and total_cells_query
-    from info dicts into tensors.
-    """
     ref_list, qry_list, match_list, temporal_list, info_list, ref_ids_list, qry_ids_list = zip(*batch)
 
     B = len(ref_list)
@@ -852,7 +747,6 @@ def collate_fn(batch):
     match_pad = torch.full((B, max_q), fill_value=max_r, dtype=torch.long)
     temporal_pairs = []
 
-    # v2.4: Extract total_cells into tensors
     total_cells_ref = torch.zeros(B, dtype=torch.long)
     total_cells_query = torch.zeros(B, dtype=torch.long)
 
@@ -881,7 +775,6 @@ def collate_fn(batch):
             if q_idx < max_q and r_idx < max_r:
                 temporal_pairs.append((b, q_idx, r_idx))
 
-        # v2.4: Extract total_cells from info
         total_cells_ref[b] = info_list[b].get("total_cells_ref", nr)
         total_cells_query[b] = info_list[b].get("total_cells_query", nq)
 
@@ -890,7 +783,7 @@ def collate_fn(batch):
 
 
 # =============================================================================
-# LOSS (UNCHANGED FROM v2.3)
+# LOSS
 # =============================================================================
 
 class MatchingLoss(nn.Module):
@@ -1027,7 +920,7 @@ class MatchingLoss(nn.Module):
 
 
 # =============================================================================
-# TRAINER (v2.4 - PASSES TOTAL CELLS TO MODEL)
+# TRAINER 
 # =============================================================================
 
 class Trainer:
@@ -1100,17 +993,15 @@ class Trainer:
         total = 0
         stage_stats = {s: {"c": 0, "t": 0} for s in ["early", "mid", "late"]}
 
-        # v2.4: Unpack total_cells from collate_fn
         for ref, qry, ref_m, qry_m, match, temporal_pairs, infos, tc_ref, tc_qry in self.val_loader:
             ref = ref.to(device)
             qry = qry.to(device)
             ref_m = ref_m.to(device)
             qry_m = qry_m.to(device)
             match = match.to(device)
-            tc_ref = tc_ref.to(device)    # v2.4
-            tc_qry = tc_qry.to(device)    # v2.4
+            tc_ref = tc_ref.to(device)  
+            tc_qry = tc_qry.to(device)  
 
-            # v2.4: Pass total_cells to model
             ref_out, qry_out, temp = self.model(ref, qry, ref_m, qry_m, tc_ref, tc_qry, epoch=epoch)
             
             if isinstance(ref_out, tuple):
@@ -1170,20 +1061,17 @@ class Trainer:
 
             pbar = tqdm(self.train_loader, desc=f"Epoch {epoch+1}/{self.cfg.num_epochs}")
 
-            # v2.4: Unpack total_cells from collate_fn
             for ref, qry, ref_m, qry_m, match, temporal_pairs, infos, tc_ref, tc_qry in pbar:
                 ref = ref.to(device)
                 qry = qry.to(device)
                 ref_m = ref_m.to(device)
                 qry_m = qry_m.to(device)
                 match = match.to(device)
-                tc_ref = tc_ref.to(device)    # v2.4
-                tc_qry = tc_qry.to(device)    # v2.4
-
+                tc_ref = tc_ref.to(device)    
+                tc_qry = tc_qry.to(device)   
                 self.opt.zero_grad(set_to_none=True)
 
                 with torch.cuda.amp.autocast(enabled=(device.type == "cuda")):
-                    # v2.4: Pass total_cells to model
                     ref_out, qry_out, temp = self.model(ref, qry, ref_m, qry_m, tc_ref, tc_qry, epoch=epoch)
                     loss, metrics = self.loss_fn(
                         ref_out, qry_out, temp,
@@ -1266,14 +1154,12 @@ def preflight_check(model, loader, loss_fn, steps=2):
         for k, batch in enumerate(loader):
             if k >= steps:
                 break
-            # v2.4: Unpack total_cells
             ref, qry, ref_m, qry_m, match, temporal_pairs, infos, tc_ref, tc_qry = batch
             ref = ref.to(device); qry = qry.to(device)
             ref_m = ref_m.to(device); qry_m = qry_m.to(device)
             match = match.to(device)
             tc_ref = tc_ref.to(device); tc_qry = tc_qry.to(device)
 
-            # v2.4: Pass total_cells to model
             ref_out, qry_out, temp = model(ref, qry, ref_m, qry_m, tc_ref, tc_qry, epoch=0)
             loss, metrics = loss_fn(
                 ref_out, qry_out, temp,
@@ -1355,4 +1241,5 @@ def main():
 
 
 if __name__ == "__main__":
+
     main()
