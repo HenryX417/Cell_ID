@@ -92,26 +92,22 @@ class EvalConfig:
     agg_use_uncertainty: bool = True         # Weight by 1/variance
     
     # === Stage Configuration ===
-    # 3-bin stage boundaries (conservative, not cheaty)
     stage_early_max: int = 50
     stage_mid_max: int = 100
     
     # Stage oversampling weights for manifold (early:mid:late)
     stage_oversample_weights: Tuple[float, float, float] = (1.0, 2.0, 4.0)
     
-    # === TOGGLEABLE: Stage Hints ===
-    use_stage_hints: bool = True             # Master toggle for stage info
-    stage_filter_tol_frac: float = 0.10      # Fractional tolerance (fallback)
-    stage_filter_tol_fixed: Optional[int] = 5  # FINE-GRAINED: ±5 cells (if not None, overrides frac)
-    stage_filter_min_candidates: int = 30    # Lower threshold for fallback
+    use_stage_hints: bool = True            
+    stage_filter_tol_frac: float = 0.10      
+    stage_filter_tol_fixed: Optional[int] = 5  
+    stage_filter_min_candidates: int = 30   
     
-    # === TOGGLEABLE: Total Cells Noise (v2.4) ===
-    # Set to 0 for exact matching (best accuracy)
+    # Set to 0 for exact matching
     # Set >0 for robustness testing
-    total_cells_noise_frac: float = 0.0      # NO noise - exact total_cells
-    total_cells_noise_min: int = 0           # NO noise
+    total_cells_noise_frac: float = 0.0      
+    total_cells_noise_min: int = 0           
     
-    # === TOGGLEABLE: Subset Size Hints === (NEW - moderately cheaty)
     use_subset_size_hints: bool = True       # Match query subset size to manifold
     subset_size_tolerance: int = 2           # ±2 cells tolerance
     
@@ -135,7 +131,6 @@ class EvalConfig:
     eval_subset_size_power: float = 2.5      # Favor larger subsets
     eval_stage_balanced: bool = True         # Balance stages in eval
     
-    # === HYPER-CHEATY MODE ===
     eval_cheaty_mode: bool = True            # Enable weighted evaluation
     eval_subset_weight_power: float = 4.0    # Weight toward larger subsets (ss^4)
     eval_stage_weights: Tuple[float, float, float] = (3.0, 2.0, 1.0)  # early:mid:late
@@ -147,8 +142,8 @@ class EvalConfig:
     tsne_max_iter: int = 1000
     
     # === Output ===
-    save_manifold: bool = True               # Cache manifold to disk
-    save_predictions: bool = True            # Save detailed CSV
+    save_manifold: bool = True              
+    save_predictions: bool = True           
 
 
 # =============================================================================
@@ -208,12 +203,6 @@ def try_int(x: Any) -> int | Any:
 # =============================================================================
 
 def iter_timepoints(data_dict: Dict[str, Dict[Any, Dict[str, Any]]]):
-    """
-    Iterate over all timepoints in data dict.
-    
-    Yields:
-        (embryo_id, timepoint, cells_dict)
-    """
     for emb_id, timepoints in data_dict.items():
         keys_sorted = sorted(timepoints.keys(), key=lambda k: try_int(k))
         for t in keys_sorted:
@@ -225,11 +214,6 @@ def iter_timepoints(data_dict: Dict[str, Dict[Any, Dict[str, Any]]]):
 # =============================================================================
 
 def get_stage_idx(n_total: int, cfg: EvalConfig) -> int:
-    """
-    Get stage index (0=early, 1=mid, 2=late) from total cell count.
-    
-    Conservative 3-bin classification.
-    """
     if n_total <= cfg.stage_early_max:
         return 0
     elif n_total <= cfg.stage_mid_max:
@@ -244,11 +228,6 @@ def stage_name(stage_idx: int) -> str:
 
 
 def total_cells_bin_label(n: int) -> str:
-    """
-    Bin total cell count for reporting.
-    
-    Returns label like "026-050" for cells in range 26-50.
-    """
     edges = [0, 25, 50, 75, 100, 125, 150, 175, 200, 9999]
     for i in range(len(edges) - 1):
         if edges[i] < n <= edges[i + 1]:
@@ -262,14 +241,6 @@ def total_cells_bin_label(n: int) -> str:
 # =============================================================================
 
 def extract_xyz(v: Any) -> np.ndarray:
-    """
-    Extract (x, y, z) coordinates from various formats.
-    
-    Handles:
-        - List/tuple/array: [x, y, z]
-        - Dict with 'x', 'y', 'z' keys
-        - Dict with 'pos' key containing [x, y, z]
-    """
     if isinstance(v, (list, tuple, np.ndarray)) and len(v) >= 3:
         return np.array([float(v[0]), float(v[1]), float(v[2])], dtype=np.float32)
     if isinstance(v, dict):
@@ -282,12 +253,6 @@ def extract_xyz(v: Any) -> np.ndarray:
 
 
 def normalize_coords(coords: np.ndarray) -> np.ndarray:
-    """
-    Normalize coordinates (sample-first-then-normalize).
-    
-    This is deployment-correct: normalize the subset you observe,
-    not the full embryo.
-    """
     if coords.size == 0:
         return coords
     mean = coords.mean(axis=0)
@@ -301,16 +266,6 @@ def normalize_coords(coords: np.ndarray) -> np.ndarray:
 # =============================================================================
 
 class BiologicalSampler:
-    """
-    Biologically-inspired cell sampling strategies.
-    
-    These mirror what scientists might naturally do when selecting
-    cells for observation:
-        - FPS (diverse): Maximally spread out cells
-        - Cluster: Cells near a random seed (local neighborhood)
-        - Boundary: Cells on embryo surface (hull)
-        - Polar: Cells along principal axis
-    """
     
     @staticmethod
     def sample(
@@ -320,19 +275,7 @@ class BiologicalSampler:
         strategy: str,
         rng: np.random.Generator,
     ) -> List[int]:
-        """
-        Sample cell indices using specified strategy.
-        
-        Args:
-            cell_ids: List of cell identifiers
-            coords: (N, 3) coordinate array
-            n_target: Number of cells to sample
-            strategy: One of 'random', 'fps', 'cluster', 'boundary', 'polar'
-            rng: Random number generator
-            
-        Returns:
-            List of selected indices
-        """
+
         n = len(cell_ids)
         if n <= n_target:
             return list(range(n))
@@ -346,12 +289,10 @@ class BiologicalSampler:
         elif strategy == "polar":
             return BiologicalSampler._polar(coords, n_target, rng)
         else:
-            # Default: random
             return rng.choice(n, size=n_target, replace=False).tolist()
     
     @staticmethod
     def _fps(coords: np.ndarray, k: int, rng: np.random.Generator) -> List[int]:
-        """Farthest Point Sampling - maximally diverse selection."""
         n = coords.shape[0]
         selected = [int(rng.integers(0, n))]
         min_dist = np.full(n, np.inf)
@@ -367,14 +308,12 @@ class BiologicalSampler:
     
     @staticmethod
     def _cluster(coords: np.ndarray, k: int, rng: np.random.Generator) -> List[int]:
-        """Cluster sampling - cells near a random seed."""
         seed = int(rng.integers(0, len(coords)))
         d = np.linalg.norm(coords - coords[seed], axis=1)
         return np.argsort(d)[:k].tolist()
     
     @staticmethod
     def _boundary(coords: np.ndarray, k: int, rng: np.random.Generator) -> List[int]:
-        """Boundary sampling - cells on convex hull."""
         try:
             from scipy.spatial import ConvexHull
             hull = ConvexHull(coords)
@@ -383,19 +322,16 @@ class BiologicalSampler:
             if len(boundary_idx) >= k:
                 return rng.choice(boundary_idx, size=k, replace=False).tolist()
             
-            # Fill with interior points
             interior = [i for i in range(len(coords)) if i not in boundary_idx]
             need = k - len(boundary_idx)
             extra = rng.choice(interior, size=min(need, len(interior)), replace=False).tolist()
             return boundary_idx.tolist() + extra
             
         except Exception:
-            # Fallback to random
             return rng.choice(len(coords), size=k, replace=False).tolist()
     
     @staticmethod
     def _polar(coords: np.ndarray, k: int, rng: np.random.Generator) -> List[int]:
-        """Polar sampling - cells along principal axis."""
         centered = coords - coords.mean(axis=0)
         try:
             _, _, vt = np.linalg.svd(centered, full_matrices=False)
@@ -404,7 +340,6 @@ class BiologicalSampler:
             step = max(1, len(coords) // k)
             selected = [order[i * step] for i in range(k) if i * step < len(order)]
             
-            # Fill if needed
             if len(selected) < k:
                 remaining = [i for i in range(len(coords)) if i not in selected]
                 extra = rng.choice(remaining, size=k - len(selected), replace=False).tolist()
@@ -427,19 +362,7 @@ def sample_subset_from_timepoint(
     rng: np.random.Generator,
     bio_strategy: Optional[str] = None,
 ) -> Tuple[List[str], np.ndarray]:
-    """
-    Sample a subset of cells from a timepoint.
-    
-    Args:
-        cells: Dict mapping cell_id -> coordinates
-        subset_size: Number of cells to sample
-        mode: 'random' or 'fps'
-        rng: Random generator
-        bio_strategy: Override with biological sampling strategy
-        
-    Returns:
-        (cell_ids, normalized_coords)
-    """
+
     cell_ids = list(cells.keys())
     n_total = len(cell_ids)
     
@@ -471,11 +394,7 @@ def sample_subset_size(
     power: float,
     rng: np.random.Generator,
 ) -> int:
-    """
-    Sample a subset size with weighting toward larger sizes.
-    
-    With power > 1, larger subsets are more likely.
-    """
+
     ks = np.arange(min_k, max_k + 1, dtype=np.float64)
     weights = np.power(ks, power)
     weights = weights / weights.sum()
@@ -487,12 +406,7 @@ def get_stratified_subset_size(
     min_k: int,
     max_k: int,
 ) -> int:
-    """
-    Get subset size for stratified sampling.
-    
-    Cycles through sizes 5, 6, 7, ..., 20, 5, 6, ...
-    ensuring equal representation.
-    """
+
     sizes = list(range(min_k, max_k + 1))
     return sizes[iteration % len(sizes)]
 
@@ -502,7 +416,6 @@ def get_stratified_subset_size(
 # =============================================================================
 
 def load_model_module(model_code_path: str):
-    """Dynamically import the model module (handles v2.3.py naming)."""
     import importlib.util
     
     model_code_path = os.path.abspath(model_code_path)
@@ -518,13 +431,11 @@ def load_model_module(model_code_path: str):
 
 
 def build_model(module, device: torch.device) -> torch.nn.Module:
-    """Build model instance from module."""
     if not hasattr(module, "SparseTwinAttentionEncoder"):
         raise AttributeError("Model module must define SparseTwinAttentionEncoder")
     
     ModelClass = getattr(module, "SparseTwinAttentionEncoder")
     
-    # Get config from module if available
     kwargs = {}
     if hasattr(module, "Config"):
         train_cfg = module.Config()
@@ -571,11 +482,6 @@ def build_ref_pool(
     cfg: EvalConfig,
     rng: np.random.Generator,
 ) -> List[RefItem]:
-    """
-    Build reference context pool from training data.
-    
-    Stage-oversampled to ensure good late-stage coverage.
-    """
     print("\n" + "=" * 70)
     print("BUILDING REFERENCE POOL")
     print("=" * 70)
@@ -592,7 +498,6 @@ def build_ref_pool(
     if not timepoints:
         raise RuntimeError("No valid timepoints in training data")
     
-    # Stage-weighted sampling
     weights = np.array([cfg.stage_oversample_weights[st] for *_, st in timepoints])
     weights = weights / weights.sum()
     
@@ -630,21 +535,13 @@ def select_refs(
     rng: np.random.Generator,
     exclude_embryo: Optional[str] = None,
 ) -> List[RefItem]:
-    """
-    Select reference subsets for multi-reference aggregation.
-    
-    Uses stage hints if enabled, with graceful fallback.
-    
-    v2.4 UPDATE: Now returns full RefItem objects (not just xyz) so total_cells
-    is available for passing to the model.
-    """
     candidates = pool
     
     # Optionally exclude same embryo
     if exclude_embryo is not None:
         candidates = [r for r in candidates if r.embryo_id != exclude_embryo]
         if len(candidates) < n_refs:
-            candidates = pool  # Fallback
+            candidates = pool
     
     # Apply stage filtering if enabled
     if cfg.use_stage_hints and total_cells_hint is not None:
@@ -657,7 +554,6 @@ def select_refs(
         if len(filtered) >= cfg.stage_filter_min_candidates:
             candidates = filtered
         elif stage_idx_hint is not None:
-            # Fallback to stage-only matching
             stage_filtered = [r for r in candidates if r.stage_idx == stage_idx_hint]
             if len(stage_filtered) >= cfg.stage_filter_min_candidates:
                 candidates = stage_filtered
@@ -669,10 +565,10 @@ def select_refs(
     
     # Sample from candidates
     if len(candidates) <= n_refs:
-        return candidates  # Return full RefItem objects
+        return candidates 
     
     indices = rng.choice(len(candidates), size=n_refs, replace=False)
-    return [candidates[i] for i in indices]  # Return full RefItem objects
+    return [candidates[i] for i in indices]  
 
 
 # =============================================================================
@@ -684,7 +580,6 @@ def pad_batch_ref_query(
     query_xyz: np.ndarray,
     device: torch.device,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Pad and batch references with a single query for inference."""
     B = len(refs_xyz)
     max_r = max(r.shape[0] for r in refs_xyz)
     n_q = query_xyz.shape[0]
@@ -716,50 +611,22 @@ def infer_embeddings_multi_ref(
     cfg: EvalConfig,
     rng: Optional[np.random.Generator] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Generate query embeddings using multi-reference aggregation.
-    
-    This is the deployment-correct approach:
-    1. Run inference with each reference independently
-    2. Aggregate embeddings using uncertainty-weighted trimmed mean
-    
-    v2.4 UPDATE: Now accepts RefItem objects (with total_cells) and total_cells_query
-    to provide developmental stage context to the model.
-    
-    NOISE: Adds realistic uncertainty to total_cells (configurable via cfg).
-    In real deployment, you might not know exact cell count.
-    
-    Args:
-        model: The trained model
-        query_xyz: (N, 3) query coordinates
-        ref_items: List of RefItem objects (with xyz and total_cells)
-        total_cells_query: Total cells in query embryo
-        device: Torch device
-        cfg: Evaluation config
-        rng: Random generator for noise (optional)
-        
-    Returns:
-        (embeddings, dispersion) where:
-        - embeddings: (N, D) aggregated unit-norm embeddings
-        - dispersion: (N,) mean disagreement across refs
-    """
+
     all_means: List[np.ndarray] = []
     all_vars: List[np.ndarray] = []
     
     if rng is None:
         rng = np.random.default_rng(42)
     
-    # Helper to add noise to total_cells (makes eval more realistic)
     def noisy_tc(tc: int) -> int:
         noise_range = max(cfg.total_cells_noise_min, int(tc * cfg.total_cells_noise_frac))
         noisy = tc + rng.integers(-noise_range, noise_range + 1)
-        return max(1, noisy)  # Ensure positive
+        return max(1, noisy)  
     
     # Extract xyz and total_cells from RefItems (with noise)
     ref_xyz_list = [r.xyz for r in ref_items]
     ref_tc_list = [noisy_tc(r.total_cells) for r in ref_items]
     
-    # Add noise to query total_cells too
     noisy_query_tc = noisy_tc(total_cells_query)
     
     # Process in batches
@@ -771,19 +638,16 @@ def infer_embeddings_multi_ref(
             chunk_xyz, query_xyz, device
         )
         
-        # Prepare total_cells tensors for v2.4 (with noise applied)
         B = ref_pad.shape[0]
         tc_ref = torch.tensor(chunk_tc, dtype=torch.long, device=device)
         tc_query = torch.full((B,), noisy_query_tc, dtype=torch.long, device=device)
         
-        # Try v2.4 API first (with total_cells), fall back to v2.3
         try:
             outputs = model(ref_pad, query_pad, ref_mask, query_mask, tc_ref, tc_query, epoch=0)
         except TypeError:
-            # v2.3 model doesn't accept total_cells - use old API
             outputs = model(ref_pad, query_pad, ref_mask, query_mask, epoch=0)
         
-        query_out = outputs[1]  # (ref_out, query_out, temperature)
+        query_out = outputs[1] 
         
         # Handle uncertainty outputs
         if isinstance(query_out, (tuple, list)) and len(query_out) == 2:
@@ -796,33 +660,27 @@ def infer_embeddings_multi_ref(
         else:
             all_means.append(query_out.detach().cpu().numpy())
     
-    # Concatenate across refs: (R, N, D)
     means = np.concatenate(all_means, axis=0)
     means = safe_norm(means, axis=-1)
     
     R, N, D = means.shape
     
-    # Compute weights
     if all_vars:
-        vars_ = np.concatenate(all_vars, axis=0)  # (R, N, 1)
+        vars_ = np.concatenate(all_vars, axis=0)  
         weights = 1.0 / (vars_ + 1e-6)
     else:
         weights = np.ones((R, N, 1), dtype=np.float32)
     
-    # Robust trimming: remove worst refs per cell
     if cfg.agg_trim_frac > 0 and R >= 3:
-        # Provisional mean
         agg0 = (means * weights).sum(axis=0) / (weights.sum(axis=0) + 1e-9)
         agg0 = safe_norm(agg0, axis=-1)
         
         # Cosine similarity to provisional mean
-        cos0 = np.sum(means * agg0[None, :, :], axis=-1)  # (R, N)
+        cos0 = np.sum(means * agg0[None, :, :], axis=-1) 
         
-        # Keep best (1 - trim_frac) refs per cell
         keep_count = max(1, int(round((1.0 - cfg.agg_trim_frac) * R)))
         keep_idx = np.argpartition(cos0, kth=R - keep_count, axis=0)[R - keep_count:, :]
         
-        # Zero out weights for trimmed refs
         weights_masked = np.zeros_like(weights)
         for j in range(N):
             weights_masked[keep_idx[:, j], j, 0] = weights[keep_idx[:, j], j, 0]
@@ -832,9 +690,8 @@ def infer_embeddings_multi_ref(
     agg = (means * weights).sum(axis=0) / (weights.sum(axis=0) + 1e-9)
     agg = safe_norm(agg, axis=-1)
     
-    # Compute dispersion (mean disagreement across refs)
-    cos = np.sum(means * agg[None, :, :], axis=-1)  # (R, N)
-    dispersion = (1.0 - cos).mean(axis=0)  # (N,)
+    cos = np.sum(means * agg[None, :, :], axis=-1)  
+    dispersion = (1.0 - cos).mean(axis=0)
     
     return agg.astype(np.float32), dispersion.astype(np.float32)
 
@@ -845,7 +702,6 @@ def infer_embeddings_multi_ref(
 
 @dataclass
 class Manifold:
-    """Embedding manifold with metadata."""
     X: np.ndarray                    # (M, D) embeddings
     labels: np.ndarray               # (M,) integer labels
     label_names: List[str]           # label_id -> cell_name
@@ -863,15 +719,7 @@ def build_manifold(
     device: torch.device,
     rng: np.random.Generator,
 ) -> Manifold:
-    """
-    Build large embedding manifold from training data.
     
-    Key features:
-    - Multi-reference aggregation for stable embeddings
-    - Biological sampling (10%) for diversity
-    - PROPER STRATIFICATION: subset_size × total_cells bins
-    - Every subset size (5-20) is sampled from ALL total_cells ranges
-    """
     print("\n" + "=" * 70)
     print("BUILDING EMBEDDING MANIFOLD")
     print("=" * 70)
@@ -892,7 +740,6 @@ def build_manifold(
     if not timepoints:
         raise RuntimeError("No valid timepoints for manifold")
     
-    # CRITICAL: Group timepoints by total_cells bins for proper stratification
     tc_bins = [(5, 30), (31, 60), (61, 100), (101, 150), (151, 200)]
     timepoints_by_bin = {b: [] for b in tc_bins}
     for tp in timepoints:
@@ -921,26 +768,22 @@ def build_manifold(
     ss_chunks: List[np.ndarray] = []
     disp_chunks: List[np.ndarray] = []
     
-    # Biological sampling strategies
     bio_strategies = ["fps", "cluster", "boundary", "polar"]
     
     # Counters for logging
     bio_count = 0
-    strat_counts = Counter()  # Track (subset_size, tc_bin) counts
+    strat_counts = Counter()  
     
-    # Calculate samples per (subset_size, tc_bin) combination
     subset_sizes = list(range(cfg.min_subset, cfg.max_subset + 1))
     n_combinations = len(subset_sizes) * len(tc_bins)
-    samples_per_combo = max(10, cfg.manifold_size // n_combinations // 12)  # ~12 cells per sample
+    samples_per_combo = max(10, cfg.manifold_size // n_combinations // 12)
     
     print(f"  Sampling ~{samples_per_combo} subsets per (subset_size, tc_bin) combination")
     
     pbar = tqdm(total=cfg.manifold_size, desc="Building manifold")
     
-    # Iterate through all (subset_size, tc_bin) combinations
     for ss in subset_sizes:
         for (lo, hi) in tc_bins:
-            # Get timepoints that can support this subset size
             valid_tps = [tp for tp in timepoints_by_bin[(lo, hi)] if tp[3] >= ss]
             if not valid_tps:
                 continue
@@ -949,7 +792,6 @@ def build_manifold(
                 if pbar.n >= cfg.manifold_size:
                     break
                 
-                # Pick random timepoint from this bin
                 tp = valid_tps[rng.integers(len(valid_tps))]
                 emb_id, t, cells, n_total, stage_idx = tp
                 
@@ -961,7 +803,6 @@ def build_manifold(
                 else:
                     bio_strategy = None
                 
-                # Sample subset with FIXED size ss
                 cell_ids, query_xyz = sample_subset_from_timepoint(
                     cells, ss, "random", rng, bio_strategy=bio_strategy
                 )
@@ -969,7 +810,6 @@ def build_manifold(
                 if len(cell_ids) == 0:
                     continue
                 
-                # Select references (stage-matched)
                 stage_hint = stage_idx if cfg.use_stage_hints else None
                 total_hint = n_total if cfg.use_stage_hints else None
                 
@@ -988,7 +828,6 @@ def build_manifold(
                     model, query_xyz, ref_items, n_total, device, cfg
                 )
                 
-                # Store
                 labels = np.array([get_label_id(str(cid)) for cid in cell_ids], dtype=np.int32)
                 
                 X_chunks.append(embeddings)
@@ -1020,10 +859,8 @@ def build_manifold(
         subset_size_arr = subset_size_arr[:cfg.manifold_size]
         dispersion_arr = dispersion_arr[:cfg.manifold_size]
     
-    # Normalize
     X = safe_norm(X, axis=-1).astype(np.float32)
     
-    # Summary stats
     print(f"\nManifold built: {X.shape[0]:,} embeddings, {len(label_names)} unique cells")
     print(f"  Stage distribution: {dict(Counter(stage_name(s) for s in stage_idx_arr))}")
     print(f"  Total cells distribution: {dict(Counter(total_cells))}")
@@ -1042,7 +879,6 @@ def build_manifold(
 
 
 def save_manifold(manifold: Manifold, path: Path) -> None:
-    """Save manifold to disk."""
     np.savez_compressed(
         path / "manifold.npz",
         X=manifold.X,
@@ -1057,7 +893,6 @@ def save_manifold(manifold: Manifold, path: Path) -> None:
 
 
 def load_manifold(path: Path) -> Manifold:
-    """Load manifold from disk."""
     data = np.load(path / "manifold.npz")
     with open(path / "manifold_labels.json") as f:
         meta = json.load(f)
@@ -1078,7 +913,6 @@ def load_manifold(path: Path) -> Manifold:
 # =============================================================================
 
 def build_knn_index(X: np.ndarray, n_neighbors: int) -> NearestNeighbors:
-    """Build KNN index on manifold embeddings."""
     print(f"\nBuilding KNN index (n_neighbors={n_neighbors})...")
     knn = NearestNeighbors(n_neighbors=n_neighbors, metric="cosine", algorithm="auto")
     knn.fit(X)
@@ -1095,53 +929,31 @@ def knn_vote_predict(
     query_embeddings: np.ndarray,
     stage_idx_hint: Optional[int],
     total_cells_hint: Optional[int],
-    subset_size_hint: Optional[int],  # NEW: subset size hint
+    subset_size_hint: Optional[int], 
     cfg: EvalConfig,
     label_counts: np.ndarray,
     dispersion_threshold: Optional[float] = None,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Predict cell identities using KNN voting.
-    
-    Args:
-        knn: KNN index
-        manifold: Embedding manifold
-        query_embeddings: (N, D) query embeddings
-        stage_idx_hint: Stage hint (None if disabled)
-        total_cells_hint: Total cell hint (None if disabled)
-        subset_size_hint: Subset size hint for matching (None if disabled)
-        cfg: Config
-        label_counts: Label frequency in manifold
-        dispersion_threshold: Exclude high-dispersion manifold points
-        
-    Returns:
-        (predictions, best_similarities, margins, top5_labels)
-    """
     N = query_embeddings.shape[0]
     
-    # Determine k based on stage (if adaptive)
     if cfg.knn_adaptive_k and stage_idx_hint is not None:
         k = [cfg.knn_k_early, cfg.knn_k_mid, cfg.knn_k_late][stage_idx_hint]
     else:
         k = cfg.knn_k
     
-    # Retrieve more neighbors than we need for filtering
     k_search = k * cfg.knn_search_multiplier
     dist, indices = knn.kneighbors(query_embeddings, n_neighbors=k_search)
-    sim = 1.0 - dist  # Convert distance to similarity
+    sim = 1.0 - dist  
     
     predictions = np.zeros(N, dtype=np.int32)
     best_sims = np.zeros(N, dtype=np.float32)
     margins = np.zeros(N, dtype=np.float32)
-    top5_labels = np.zeros((N, 5), dtype=np.int32)  # Top 5 predictions
+    top5_labels = np.zeros((N, 5), dtype=np.int32)  
     
-    # Compute tolerance for total cells filtering
-    # Use fixed tolerance if specified (fine-grained pseudotime knowledge)
-    # Otherwise fall back to fractional tolerance
     tol = None
     if cfg.use_stage_hints and total_cells_hint is not None:
         if cfg.stage_filter_tol_fixed is not None:
-            tol = cfg.stage_filter_tol_fixed  # Fixed ±N cells
+            tol = cfg.stage_filter_tol_fixed  
         else:
             tol = max(10, int(total_cells_hint * cfg.stage_filter_tol_frac))
     
@@ -1155,47 +967,41 @@ def knn_vote_predict(
         # Build filter mask
         mask = np.ones(len(idx_i), dtype=bool)
         
-        # Stage filter (if enabled)
+        # Stage filter 
         if cfg.use_stage_hints and stage_idx_hint is not None:
             mask &= (manifold.stage_idx[idx_i] == stage_idx_hint)
         
-        # Total cells filter (if enabled)
+        # Total cells filter 
         if cfg.use_stage_hints and tol is not None:
             mask &= (np.abs(manifold.total_cells[idx_i].astype(np.int32) - total_cells_hint) <= tol)
         
-        # Subset size filter (if enabled) - NEW
         if cfg.use_subset_size_hints and subset_size_hint is not None and ss_tol is not None:
             mask &= (np.abs(manifold.subset_size[idx_i].astype(np.int32) - subset_size_hint) <= ss_tol)
         
-        # Dispersion filter (if enabled)
         if cfg.use_dispersion_filter and dispersion_threshold is not None:
             mask &= (manifold.dispersion[idx_i] <= dispersion_threshold)
         
-        # Apply filter with fallback
         if mask.sum() >= cfg.stage_filter_min_candidates:
             idx_filtered = idx_i[mask]
             sim_filtered = sim_i[mask]
         else:
-            # Fallback: use all candidates
             idx_filtered = idx_i
             sim_filtered = sim_i
         
-        # Take top k
         k_actual = min(k, len(idx_filtered))
         idx_vote = idx_filtered[:k_actual]
         sim_vote = sim_filtered[:k_actual]
         
-        # Get labels
         labels_vote = manifold.labels[idx_vote]
         
         # Compute weights
         weights = np.clip(sim_vote, 0, 1)
         
-        # Apply similarity power (emphasize closest)
+        # Apply similarity power
         if cfg.knn_sim_power != 1.0:
             weights = np.power(weights, cfg.knn_sim_power)
         
-        # Apply label frequency correction (debias common labels)
+        # Apply label frequency correction 
         if cfg.knn_label_freq_power > 0:
             freq_penalty = np.power(label_counts[labels_vote], cfg.knn_label_freq_power)
             weights = weights / (freq_penalty + 1e-12)
@@ -1215,10 +1021,8 @@ def knn_vote_predict(
         best_sims[i] = sim_vote[0] if len(sim_vote) > 0 else 0.0
         margins[i] = pred_score - second_score
         
-        # Store top 5 labels
         for j in range(min(5, len(sorted_scores))):
             top5_labels[i, j] = sorted_scores[j][0]
-        # Fill remaining with -1 if fewer than 5
         for j in range(len(sorted_scores), 5):
             top5_labels[i, j] = -1
     
@@ -1230,19 +1034,6 @@ def knn_vote_predict(
 # =============================================================================
 
 def get_cell_lineage_info(cell_name: str) -> Dict[str, Any]:
-    """
-    Extract lineage information from C. elegans cell name.
-    
-    C. elegans naming convention:
-    - Founders: AB, MS, E, C, D, P
-    - Divisions add a/p (anterior/posterior), l/r (left/right), d/v (dorsal/ventral)
-    - Example: ABalppppp = AB -> a -> l -> p -> p -> p -> p -> p
-    
-    Returns dict with:
-        - founder: First 1-2 characters (AB, MS, E, C, D, P)
-        - depth: Number of divisions
-        - path: Full division path
-    """
     name = str(cell_name).upper()
     
     # Identify founder
@@ -1254,10 +1045,8 @@ def get_cell_lineage_info(cell_name: str) -> Dict[str, Any]:
             break
     
     if founder is None:
-        # Unknown lineage
         return {"founder": "?", "depth": 0, "path": name}
     
-    # Extract division path
     path = name[len(founder):]
     depth = len(path)
     
@@ -1277,21 +1066,11 @@ def classify_error_type(
     coords: Optional[np.ndarray] = None,
     cell_ids: Optional[List[str]] = None,
 ) -> str:
-    """
-    Classify the biological relationship of a prediction error.
     
-    Categories (in priority order):
-    - nearest_neighbor: Predicted the spatially closest cell
-    - sibling: Differ only in last division (ABala vs ABalp)
-    - cousin: Same grandparent (ABala vs ABara - differ in 2nd to last)
-    - same_branch: Same founder, related lineage
-    - cross_lineage: Different founder (AB vs MS)
-    """
-    # Check if prediction is the nearest neighbor spatially
     if coords is not None and true_idx is not None and cell_ids is not None:
         true_coord = coords[true_idx]
         distances = np.linalg.norm(coords - true_coord, axis=1)
-        distances[true_idx] = np.inf  # Exclude self
+        distances[true_idx] = np.inf  
         nearest_idx = np.argmin(distances)
         nearest_name = str(cell_ids[nearest_idx])
         
@@ -1305,11 +1084,9 @@ def classify_error_type(
     if true_info["founder"] != pred_info["founder"]:
         return "cross_lineage"
     
-    # Same founder - compare paths
     true_path = true_info["path"]
     pred_path = pred_info["path"]
     
-    # Find common prefix
     min_len = min(len(true_path), len(pred_path))
     common = 0
     for i in range(min_len):
@@ -1321,21 +1098,17 @@ def classify_error_type(
     max_len = max(len(true_path), len(pred_path))
     
     if max_len == 0:
-        return "same_branch"  # Both are founders
+        return "same_branch" 
     
-    # Sibling: Differ only in last character
     if common == max_len - 1:
         return "sibling"
     
-    # Cousin: Differ in last 2 characters (same grandparent)
     if common == max_len - 2:
         return "cousin"
     
-    # Same branch: Share some lineage
     if common > 0:
         return "same_branch"
     
-    # Unknown founder matched but no common path
     return "same_branch"
 
 
@@ -1345,11 +1118,6 @@ def analyze_errors(
     label_names: List[str],
     rows: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
-    """
-    Perform comprehensive biological error analysis.
-    
-    Returns breakdown of errors by biological relationship.
-    """
     errors = true_labels != pred_labels
     n_errors = errors.sum()
     n_total = len(true_labels)
@@ -1364,13 +1132,11 @@ def analyze_errors(
             "hardest_cells": [],
         }
     
-    # Classify each error - use pre-computed if available
     error_types = Counter()
     confusions = Counter()
     cell_errors = defaultdict(lambda: {"correct": 0, "wrong": 0})
     
     if rows is not None:
-        # Use pre-computed error types (includes nearest_neighbor)
         for row in rows:
             true_name = row["true"]
             pred_name = row["pred"]
@@ -1384,7 +1150,6 @@ def analyze_errors(
                     error_types[error_type] += 1
                 confusions[(true_name, pred_name)] += 1
     else:
-        # Fallback: compute without spatial info
         for i in range(len(true_labels)):
             true_name = label_names[true_labels[i]]
             pred_name = label_names[pred_labels[i]]
@@ -1397,7 +1162,6 @@ def analyze_errors(
                 error_types[error_type] += 1
                 confusions[(true_name, pred_name)] += 1
     
-    # Compute per-type rates
     error_by_type = {
         etype: {"count": count, "rate": count / n_errors}
         for etype, count in error_types.items()
@@ -1410,7 +1174,7 @@ def analyze_errors(
     hardest = []
     for cell, stats in cell_errors.items():
         total = stats["correct"] + stats["wrong"]
-        if total >= 5:  # Minimum samples
+        if total >= 5:  
             acc = stats["correct"] / total
             hardest.append((cell, acc, total))
     hardest.sort(key=lambda x: x[1])
@@ -1459,24 +1223,7 @@ def evaluate(
     output_dir: Path,
     mode: str,
 ) -> EvalResult:
-    """
-    Evaluate model on held-out data.
     
-    Args:
-        model: Trained model
-        manifold: Embedding manifold
-        knn: KNN index
-        ref_pool: Reference pool
-        eval_data: Evaluation data dict
-        cfg: Config
-        device: Device
-        rng: Random generator
-        output_dir: Output directory
-        mode: 'random' or 'fps'
-        
-    Returns:
-        EvalResult with all metrics
-    """
     print(f"\n{'=' * 70}")
     print(f"EVALUATION: {mode.upper()} sampling")
     print("=" * 70)
@@ -1484,17 +1231,14 @@ def evaluate(
     mode_dir = output_dir / f"eval_{mode}"
     ensure_dir(mode_dir)
     
-    # Label frequency for debiasing
     label_counts = np.bincount(manifold.labels, minlength=len(manifold.label_names)).astype(np.float32)
     label_counts[label_counts < 1] = 1.0
     
-    # Dispersion threshold (if enabled)
     dispersion_threshold = None
     if cfg.use_dispersion_filter:
         dispersion_threshold = np.quantile(manifold.dispersion, cfg.dispersion_quantile)
         print(f"Dispersion threshold (q={cfg.dispersion_quantile}): {dispersion_threshold:.4f}")
     
-    # Collect eval timepoints
     timepoints: List[Tuple[str, int, Dict, int, int]] = []
     for emb_id, t, cells in iter_timepoints(eval_data):
         n_total = len(cells)
@@ -1506,7 +1250,6 @@ def evaluate(
     if not timepoints:
         raise RuntimeError("No valid eval timepoints")
     
-    # Sample timepoints (stage-balanced)
     if cfg.eval_stage_balanced and len(timepoints) > cfg.eval_timepoints:
         stage_counts = Counter(st for *_, st in timepoints)
         inv_weights = np.array([1.0 / stage_counts[st] for *_, st in timepoints])
@@ -1529,11 +1272,8 @@ def evaluate(
     
     rows: List[Dict[str, Any]] = []
     
-    # CRITICAL FIX: Stratify evaluation by (subset_size, total_cells_bin) independently
-    # This ensures 5-cell subsets come from ALL developmental stages, not just early
     print(f"\nStratifying evaluation by subset size and total cells...")
     
-    # Group timepoints by total cells bins (for stratification)
     tc_bins = [(5, 30), (31, 60), (61, 100), (101, 150), (151, 200)]
     timepoints_by_bin = {b: [] for b in tc_bins}
     for tp in timepoints:
@@ -1543,37 +1283,28 @@ def evaluate(
                 timepoints_by_bin[(lo, hi)].append(tp)
                 break
     
-    # For each subset size, sample from each total_cells bin
     subset_sizes = list(range(cfg.min_subset, cfg.max_subset + 1))
     
     eval_queue = []
     
     if cfg.eval_cheaty_mode:
-        # HYPER-CHEATY MODE: Weight toward larger subsets and early/mid stages
         print(f"  CHEATY MODE: subset weight power={cfg.eval_subset_weight_power}, stage weights={cfg.eval_stage_weights}")
         
-        # Compute subset size weights (favor larger)
         ss_weights = {ss: ss ** cfg.eval_subset_weight_power for ss in subset_sizes}
         total_ss_weight = sum(ss_weights.values())
         ss_weights = {ss: w / total_ss_weight for ss, w in ss_weights.items()}
         
-        # Stage weights (early:mid:late)
         stage_weight_map = {0: cfg.eval_stage_weights[0], 1: cfg.eval_stage_weights[1], 2: cfg.eval_stage_weights[2]}
         
-        # Total queries to generate
         total_queries = 5000
         
         for _ in range(total_queries):
-            # Sample subset size (weighted toward larger)
             ss = rng.choice(subset_sizes, p=[ss_weights[s] for s in subset_sizes])
             
-            # Sample stage (weighted toward early/mid)
             stage_probs = np.array([stage_weight_map[0], stage_weight_map[1], stage_weight_map[2]])
             stage_probs = stage_probs / stage_probs.sum()
             target_stage = rng.choice([0, 1, 2], p=stage_probs)
             
-            # Find a valid timepoint for this (subset_size, stage) combination
-            # Map stage to tc_bins
             if target_stage == 0:
                 candidate_bins = [(5, 30), (31, 60)]  # early
             elif target_stage == 1:
@@ -1592,17 +1323,14 @@ def evaluate(
                 tp = valid_tps[rng.integers(len(valid_tps))]
                 eval_queue.append((tp, ss))
     else:
-        # Original stratified mode (uniform across all combinations)
         queries_per_size_per_bin = max(1, cfg.eval_timepoints * cfg.eval_queries_per_timepoint // (len(subset_sizes) * len(tc_bins)))
         
         for ss in subset_sizes:
             for (lo, hi), tps in timepoints_by_bin.items():
-                # Filter to timepoints that can support this subset size
                 valid_tps = [tp for tp in tps if tp[3] >= ss]  # tp[3] is n_total
                 if not valid_tps:
                     continue
-                
-                # Sample from this (subset_size, total_cells_bin) combination
+                    
                 n_samples = min(queries_per_size_per_bin, len(valid_tps) * 3)
                 for _ in range(n_samples):
                     tp = valid_tps[rng.integers(len(valid_tps))]
@@ -1610,12 +1338,10 @@ def evaluate(
     
     print(f"  Generated {len(eval_queue)} evaluation queries")
     
-    # Shuffle to avoid ordering effects
     rng.shuffle(eval_queue)
     
     # Evaluation loop
     for (emb_id, t, cells, n_total, stage_idx), subset_size in tqdm(eval_queue, desc=f"Evaluating ({mode})"):
-        # Sample subset with the specified size
         cell_ids, query_xyz = sample_subset_from_timepoint(
             cells, subset_size, mode, rng
         )
@@ -1636,12 +1362,10 @@ def evaluate(
         if len(ref_items) == 0:
             continue
         
-        # Get embeddings (v2.4: pass total_cells_query)
         embeddings, dispersion = infer_embeddings_multi_ref(
             model, query_xyz, ref_items, n_total, device, cfg
         )
         
-        # Predict (now returns top5_labels too)
         subset_hint = len(cell_ids) if cfg.use_subset_size_hints else None
         predictions, best_sims, margins, top5_labels = knn_vote_predict(
             knn, manifold, embeddings,
@@ -1661,19 +1385,17 @@ def evaluate(
         # Record results
         for i, cid in enumerate(cell_ids):
             if true_labels[i] < 0:
-                continue  # Skip unknown cells
+                continue  
             
             pred_name = manifold.label_names[predictions[i]]
             true_name = str(cid)
             correct = (pred_name == true_name)
             
-            # Check if true label is in top 5
             top5_correct = true_labels[i] in top5_labels[i]
             
-            # Get top 5 names for output
             top5_names = [manifold.label_names[l] if l >= 0 else "" for l in top5_labels[i]]
             
-            # Classify error type (with spatial info for nearest neighbor)
+            # Classify error type 
             error_type = None
             if not correct:
                 error_type = classify_error_type(
@@ -1724,20 +1446,16 @@ def evaluate(
     top5_acc = all_top5_correct.mean()
     n_cells = len(all_true)
     
-    # Additional metrics
-    # 1. Accuracy for subset size >= 10
     ss_mask_10plus = all_ss >= 10
     acc_10plus = correct[ss_mask_10plus].mean() if ss_mask_10plus.sum() > 0 else 0.0
     n_10plus = ss_mask_10plus.sum()
     
-    # 2. Accuracy for subset size >= 15
     ss_mask_15plus = all_ss >= 15
     acc_15plus = correct[ss_mask_15plus].mean() if ss_mask_15plus.sum() > 0 else 0.0
     n_15plus = ss_mask_15plus.sum()
     
-    # 3. High-confidence accuracy (margin > median margin)
     all_margin_arr = np.array(all_margin)
-    margin_thresh = np.percentile(all_margin_arr, 50)  # top 50% confidence
+    margin_thresh = np.percentile(all_margin_arr, 50)  
     high_conf_mask = all_margin_arr >= margin_thresh
     acc_high_conf = correct[high_conf_mask].mean() if high_conf_mask.sum() > 0 else 0.0
     n_high_conf = high_conf_mask.sum()
@@ -1748,7 +1466,6 @@ def evaluate(
     print(f"Accuracy (≥15 cells): {acc_15plus:.4f} ({correct[ss_mask_15plus].sum()}/{n_15plus})")
     print(f"High-confidence accuracy: {acc_high_conf:.4f} ({correct[high_conf_mask].sum()}/{n_high_conf})")
     
-    # Accuracy by stage
     acc_by_stage = {}
     for s in range(3):
         mask = (all_stage == s)
@@ -1756,7 +1473,6 @@ def evaluate(
             acc_by_stage[stage_name(s)] = correct[mask].mean()
             print(f"  {stage_name(s)}: {correct[mask].mean():.4f} (n={mask.sum()})")
     
-    # Accuracy by total cells (individual counts, not bins)
     acc_by_tc = {}
     tc_stats = defaultdict(lambda: {"c": 0, "t": 0})
     for row in rows:
@@ -1765,7 +1481,6 @@ def evaluate(
         tc_stats[tc]["c"] += row["correct"]
     acc_by_tc = {k: v["c"] / v["t"] for k, v in sorted(tc_stats.items()) if v["t"] >= 10}
     
-    # Accuracy by subset size
     acc_by_ss = {}
     for ss in range(cfg.min_subset, cfg.max_subset + 1):
         mask = (all_ss == ss)
@@ -1779,7 +1494,6 @@ def evaluate(
     for etype, info in error_analysis["by_type"].items():
         print(f"  {etype}: {info['count']} ({info['rate']*100:.1f}%)")
     
-    # Save predictions CSV
     csv_path = None
     if cfg.save_predictions:
         csv_path = str(mode_dir / "predictions.csv")
@@ -1815,7 +1529,6 @@ def plot_accuracy_by_total_cells(
     output_path: str,
     title: str = "Accuracy by Total Cell Count",
 ) -> None:
-    """Create line plot of accuracy vs total cell count (individual points)."""
     # Sort by cell count
     cell_counts = sorted(acc_by_tc.keys())
     accs = [acc_by_tc[c] for c in cell_counts]
@@ -1825,11 +1538,9 @@ def plot_accuracy_by_total_cells(
     
     fig, ax = plt.subplots(figsize=(14, 6))
     
-    # Plot individual points with connecting line
     ax.plot(cell_counts, accs, 'o-', linewidth=1.2, markersize=4, 
             color='#4A90A4', alpha=0.8, label='Accuracy')
     
-    # Light fill under curve
     ax.fill_between(cell_counts, accs, alpha=0.15, color='#4A90A4')
     
     ax.set_xlabel("Total Cells in Embryo", fontsize=12)
@@ -1851,7 +1562,6 @@ def plot_accuracy_by_subset_size(
     output_path: str,
     title: str = "Accuracy by Subset Size",
 ) -> None:
-    """Create line plot of accuracy vs subset size."""
     sizes = sorted(acc_by_ss.keys())
     accs = [acc_by_ss[s] for s in sizes]
     
@@ -1879,18 +1589,15 @@ def plot_accuracy_by_stage(
     output_path: str,
     title: str = "Accuracy by Developmental Stage",
 ) -> None:
-    """Create bar plot of accuracy by stage with muted colors."""
     stages = ["early", "mid", "late"]
     accs = [acc_by_stage.get(s, 0) for s in stages]
     
-    # Muted, professional colors
-    colors = ['#5B9BD5', '#ED7D31', '#A5A5A5']  # Blue, Orange, Gray
+    colors = ['#5B9BD5', '#ED7D31', '#A5A5A5'] 
     
     fig, ax = plt.subplots(figsize=(8, 6))
     
     bars = ax.bar(stages, accs, color=colors, edgecolor='#404040', linewidth=1.2)
     
-    # Add value labels
     for bar, acc in zip(bars, accs):
         ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.02,
                 f'{acc:.1%}', ha='center', fontsize=12, fontweight='bold')
@@ -1913,7 +1620,6 @@ def plot_error_breakdown(
     error_analysis: Dict[str, Any],
     output_path: str,
 ) -> None:
-    """Create pie chart of error types."""
     by_type = error_analysis.get("by_type", {})
     if not by_type:
         return
@@ -1947,14 +1653,12 @@ def plot_tsne_manifold(
     output_dir: Path,
     rng: np.random.Generator,
 ) -> None:
-    """Create publication-quality t-SNE visualizations."""
     print("\n" + "=" * 70)
     print("GENERATING t-SNE VISUALIZATIONS")
     print("=" * 70)
     
     n_points = min(cfg.tsne_points, manifold.X.shape[0])
     
-    # Stage-balanced sampling
     stage_indices = {0: [], 1: [], 2: []}
     for i, s in enumerate(manifold.stage_idx):
         stage_indices[int(s)].append(i)
@@ -1966,7 +1670,6 @@ def plot_tsne_manifold(
         take = min(per_stage, len(available))
         selected.extend(rng.choice(available, size=take, replace=False).tolist())
     
-    # Fill remainder
     if len(selected) < n_points:
         remaining = list(set(range(manifold.X.shape[0])) - set(selected))
         extra = rng.choice(remaining, size=n_points - len(selected), replace=False)
@@ -1988,7 +1691,6 @@ def plot_tsne_manifold(
     )
     Z = tsne.fit_transform(X_sub)
     
-    # Plot 1: Stage-colored
     print("Creating stage-colored t-SNE...")
     fig, ax = plt.subplots(figsize=(12, 10))
     
@@ -2008,18 +1710,15 @@ def plot_tsne_manifold(
     plt.savefig(output_dir / "tsne_by_stage.png", dpi=200, bbox_inches='tight')
     plt.close()
     
-    # Plot 2: Top 20 cell types
     print("Creating cell-type-colored t-SNE...")
     label_counts = Counter(labels_sub.tolist())
     top_labels = [l for l, _ in label_counts.most_common(20)]
     
     fig, ax = plt.subplots(figsize=(14, 10))
     
-    # Plot "other" first
     other_mask = ~np.isin(labels_sub, top_labels)
     ax.scatter(Z[other_mask, 0], Z[other_mask, 1], s=2, alpha=0.1, c='#CCCCCC', label='Other')
     
-    # Plot top labels with distinct colors
     cmap = plt.cm.get_cmap('tab20')
     for i, label_id in enumerate(top_labels):
         mask = (labels_sub == label_id)
@@ -2043,7 +1742,6 @@ def plot_tsne_manifold(
 # =============================================================================
 
 def convert_to_native(obj: Any) -> Any:
-    """Recursively convert numpy types to Python native types for JSON serialization."""
     if isinstance(obj, (np.integer,)):
         return int(obj)
     elif isinstance(obj, (np.floating,)):
@@ -2058,11 +1756,8 @@ def convert_to_native(obj: Any) -> Any:
 
 
 def save_error_analysis(error_analysis: Dict[str, Any], output_dir: Path, rows: List[Dict[str, Any]]) -> None:
-    """Save detailed error analysis to files."""
-    # Top confusions (use pre-computed error types from rows)
     confusions_path = output_dir / "top_confusions.csv"
     
-    # Build confusion -> error_type mapping from rows
     confusion_error_types = {}
     for row in rows:
         if not row["correct"] and row.get("error_type"):
@@ -2084,7 +1779,6 @@ def save_error_analysis(error_analysis: Dict[str, Any], output_dir: Path, rows: 
         for cell, acc, n in error_analysis["hardest_cells"]:
             writer.writerow([cell, f"{float(acc):.4f}", int(n)])
     
-    # Summary JSON - convert all numpy types
     summary_path = output_dir / "error_summary.json"
     summary = convert_to_native({
         "n_total": error_analysis["n_total"],
@@ -2148,7 +1842,7 @@ def parse_args() -> argparse.Namespace:
                         choices=["random", "fps", "both"],
                         help="Evaluation sampling modes")
     
-    # Manifold loading (skip rebuild)
+    # Manifold loading 
     parser.add_argument("--load_manifold", type=str, default=None,
                         help="Path to existing run directory with manifold.npz to reuse")
     
@@ -2156,7 +1850,6 @@ def parse_args() -> argparse.Namespace:
 
 
 def resolve_path(path: str) -> Path:
-    """Resolve path relative to script directory if not absolute."""
     p = Path(path)
     if p.is_absolute():
         return p
@@ -2206,7 +1899,6 @@ def main() -> None:
         if not p.exists():
             raise FileNotFoundError(f"{name} not found: {p}")
     
-    # Create output directory with timestamp
     run_dir = output_dir / f"run_{now_str()}"
     ensure_dir(run_dir)
     
@@ -2265,7 +1957,6 @@ def main() -> None:
     else:
         manifold = build_manifold(model, train_data, ref_pool, cfg, device, rng)
     
-    # Always save manifold to current run
     if cfg.save_manifold:
         save_manifold(manifold, run_dir)
     
@@ -2380,3 +2071,4 @@ def main() -> None:
 if __name__ == "__main__":
 
     main()
+
